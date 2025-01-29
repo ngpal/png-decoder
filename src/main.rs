@@ -17,7 +17,6 @@ struct CrcManager {
 }
 
 const CRC_POLYNOMIAL: u32 = 0xedb88320;
-
 impl CrcManager {
     fn make_crc_table() -> [u32; 256] {
         let mut table = [0u32; 256];
@@ -55,6 +54,30 @@ impl CrcManager {
     }
 }
 
+macro_rules! read_bytes {
+    ($size:expr, $file:expr) => {{
+        let mut buf = [0u8; $size];
+        $file
+            .read_exact(&mut buf)
+            .expect("failed to read from file");
+        buf
+    }};
+}
+
+macro_rules! read_varying_bytes {
+    ($size:ident, $file:expr) => {{
+        let mut data = Vec::new();
+        for _ in 0..$size {
+            let mut buf = [0u8];
+            $file
+                .read_exact(&mut buf)
+                .expect("failed to read from file");
+            data.push(buf[0]);
+        }
+        data
+    }};
+}
+
 fn main() -> io::Result<()> {
     print!("Enter file name: ");
     stdout().flush().unwrap();
@@ -70,43 +93,38 @@ fn main() -> io::Result<()> {
         println!("This is not a PNG file");
     }
 
-    // Check crc of IHDR chunk
+    // Check crc of all chunks
     let mut crc_manager = CrcManager { table: None };
 
-    // Get size of IHDR chunk
+    loop {
+        // Get size of IHDR chunk
+        let chunk_size_bytes = read_bytes!(4, file);
+        let chunk_size = u32::from_be_bytes(chunk_size_bytes);
 
-    let mut ihdr_size_bytes = [0u8; 4];
-    file.read(&mut ihdr_size_bytes)?;
-    let ihdr_size = u32::from_be_bytes(ihdr_size_bytes);
+        let chunk_type_bytes = read_bytes!(4, file);
+        let chunk_type = String::from_utf8(chunk_type_bytes.into()).unwrap();
 
-    let mut chunk_type_bytes = [0u8; 4];
-    file.read(&mut chunk_type_bytes)?;
-    let chunk_type = String::from_utf8(chunk_type_bytes.into()).unwrap();
+        // Read data
+        let data_bytes = read_varying_bytes!(chunk_size, file);
 
-    if chunk_type != "IHDR" {
-        panic!("IHDR chunk not fonud");
-    } else {
-        println!("IHDR chunk found of size {}", ihdr_size);
+        let mut crc_buf = Vec::from(chunk_type_bytes);
+        crc_buf.extend(data_bytes);
+
+        let crc = crc_manager.crc(crc_buf);
+        let mut file_crc_bytes = [0u8; 4];
+        file.read(&mut file_crc_bytes)?;
+        let file_crc = u32::from_be_bytes(file_crc_bytes);
+
+        if crc != file_crc {
+            panic!("Found CRC {} vs {} in chunk {}", crc, file_crc, chunk_type);
+        }
+
+        if chunk_type == "IEND" {
+            break;
+        }
     }
 
-    // Read data
-    let mut data = Vec::new();
-    for _ in 0..ihdr_size {
-        let mut buf = [0u8];
-        file.read(&mut buf)?;
-        data.push(buf[0]);
-    }
-
-    let mut crc_buf = Vec::from(chunk_type_bytes);
-    crc_buf.extend(data);
-
-    let crc = crc_manager.crc(crc_buf);
-    println!("CRC calculated is: {:x}", crc);
-
-    let mut file_crc_bytes = [0u8; 4];
-    file.read(&mut file_crc_bytes)?;
-
-    println!("CRC found is: {:x}", u32::from_be_bytes(file_crc_bytes));
+    println!("All CRCs have been verified");
 
     Ok(())
 }
