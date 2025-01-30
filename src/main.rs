@@ -80,7 +80,7 @@ macro_rules! read_varying_bytes {
 
 fn main() -> io::Result<()> {
     print!("Enter file name: ");
-    stdout().flush().unwrap();
+    stdout().flush()?;
 
     let mut filename = String::new();
     stdin().read_line(&mut filename)?;
@@ -118,6 +118,8 @@ fn main() -> io::Result<()> {
         if crc != file_crc {
             panic!("Found CRC {} vs {} in chunk {}", crc, file_crc, chunk_type);
         }
+
+        println!("Chunk {}", chunk_type);
 
         if chunk_type == "IEND" {
             break;
